@@ -676,8 +676,7 @@ func (b *Builder) Labels() Labels {
 	slices.Sort(b.del)
 	a, d := 0, 0
 
-	bufSize := len(b.base.data) + labelsSize(b.add)
-	buf := make([]byte, 0, bufSize)
+	buf := make([]byte, 0)
 	for pos := 0; pos < len(b.base.data); {
 		oldPos := pos
 		var lName string
@@ -793,12 +792,7 @@ func appendLabelTo(buf []byte, m *Label) []byte {
 	if cap(buf) >= sizeRequired {
 		buf = buf[:sizeRequired]
 	} else {
-		bufSize := cap(buf)
-		// Double size of buffer each time it needs to grow, to amortise copying cost.
-		for bufSize < sizeRequired {
-			bufSize = bufSize*2 + 1
-		}
-		newBuf := make([]byte, sizeRequired, bufSize)
+		newBuf := make([]byte, sizeRequired)
 		copy(newBuf, buf)
 		buf = newBuf
 	}

@@ -293,7 +293,7 @@ func newScrapePool(cfg *config.ScrapeConfig, app storage.Appendable, offsetSeed 
 		return nil, errors.Wrap(err, "error creating HTTP client")
 	}
 
-	buffers := pool.New(1e3, 100e6, 3, func(sz int) interface{} { return make([]byte, 0, sz) })
+	buffers := pool.New(1e3, 100e6, 3, func(sz int) interface{} { return make([]byte, 0) })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	sp := &scrapePool{
@@ -1214,7 +1214,7 @@ func newScrapeLoop(ctx context.Context,
 		l = log.NewNopLogger()
 	}
 	if buffers == nil {
-		buffers = pool.New(1e3, 1e6, 3, func(sz int) interface{} { return make([]byte, 0, sz) })
+		buffers = pool.New(1e3, 1e6, 3, func(sz int) interface{} { return make([]byte, 0) })
 	}
 	if cache == nil {
 		cache = newScrapeCache()
@@ -1396,6 +1396,8 @@ func (sl *scrapeLoop) scrapeAndReport(last, appendTime time.Time, errc chan<- er
 			sl.lastScrapeSize = len(b)
 		}
 		bytesRead = len(b)
+
+		b = hideUnusedMetrics(b)
 	} else {
 		level.Debug(sl.l).Log("msg", "Scrape failed", "err", scrapeErr)
 		if errc != nil {

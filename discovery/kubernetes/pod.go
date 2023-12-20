@@ -165,6 +165,12 @@ func (p *Pod) process(ctx context.Context, ch chan<- []*targetgroup.Group) bool 
 		level.Error(p.logger).Log("msg", "converting to Pod object failed", "err", err)
 		return true
 	}
+
+	if pod.Status.Phase != apiv1.PodRunning && pod.Status.Phase != apiv1.PodPending {
+		// ignore pods that are not running and are not pending
+		return true
+	}
+
 	send(ctx, ch, p.buildPod(pod))
 	return true
 }
