@@ -38,6 +38,7 @@ import (
 	"github.com/prometheus/prometheus/util/annotations"
 	"github.com/prometheus/prometheus/util/stats"
 	"github.com/prometheus/prometheus/util/teststorage"
+	"github.com/prometheus/prometheus/util/testutil"
 )
 
 func TestMain(m *testing.M) {
@@ -1631,7 +1632,7 @@ load 1ms
 				sort.Sort(expMat)
 				sort.Sort(res.Value.(Matrix))
 			}
-			require.Equal(t, c.result, res.Value, "query %q failed", c.query)
+			testutil.RequireEqual(t, c.result, res.Value, "query %q failed", c.query)
 		})
 	}
 }
@@ -1956,7 +1957,7 @@ func TestSubquerySelector(t *testing.T) {
 					require.Equal(t, c.Result.Err, res.Err)
 					mat := res.Value.(Matrix)
 					sort.Sort(mat)
-					require.Equal(t, c.Result.Value, mat)
+					testutil.RequireEqual(t, c.Result.Value, mat)
 				})
 			}
 		})
@@ -2001,7 +2002,7 @@ load 1m
 
 	res := qry.Exec(context.Background())
 	require.NoError(t, res.Err)
-	require.Equal(t, expectedResult, res.Value)
+	testutil.RequireEqual(t, expectedResult, res.Value)
 }
 
 type FakeQueryLogger struct {
@@ -3147,7 +3148,7 @@ func TestRangeQuery(t *testing.T) {
 
 			res := qry.Exec(context.Background())
 			require.NoError(t, res.Err)
-			require.Equal(t, c.Result, res.Value)
+			testutil.RequireEqual(t, c.Result, res.Value)
 		})
 	}
 }
@@ -3169,28 +3170,75 @@ func TestNativeHistogramRate(t *testing.T) {
 	}
 	require.NoError(t, app.Commit())
 
-	queryString := fmt.Sprintf("rate(%s[1m])", seriesName)
-	qry, err := engine.NewInstantQuery(context.Background(), storage, nil, queryString, timestamp.Time(int64(5*time.Minute/time.Millisecond)))
-	require.NoError(t, err)
-	res := qry.Exec(context.Background())
-	require.NoError(t, res.Err)
-	vector, err := res.Vector()
-	require.NoError(t, err)
-	require.Len(t, vector, 1)
-	actualHistogram := vector[0].H
-	expectedHistogram := &histogram.FloatHistogram{
-		CounterResetHint: histogram.GaugeType,
-		Schema:           1,
-		ZeroThreshold:    0.001,
-		ZeroCount:        1. / 15.,
-		Count:            9. / 15.,
-		Sum:              1.226666666666667,
-		PositiveSpans:    []histogram.Span{{Offset: 0, Length: 2}, {Offset: 1, Length: 2}},
-		PositiveBuckets:  []float64{1. / 15., 1. / 15., 1. / 15., 1. / 15.},
-		NegativeSpans:    []histogram.Span{{Offset: 0, Length: 2}, {Offset: 1, Length: 2}},
-		NegativeBuckets:  []float64{1. / 15., 1. / 15., 1. / 15., 1. / 15.},
-	}
-	require.Equal(t, expectedHistogram, actualHistogram)
+	queryString := fmt.Sprintf("rate(%s[45s])", seriesName)
+	t.Run("instant_query", func(t *testing.T) {
+		qry, err := engine.NewInstantQuery(context.Background(), storage, nil, queryString, timestamp.Time(int64(5*time.Minute/time.Millisecond)))
+		require.NoError(t, err)
+		res := qry.Exec(context.Background())
+		require.NoError(t, res.Err)
+		vector, err := res.Vector()
+		require.NoError(t, err)
+		require.Len(t, vector, 1)
+		actualHistogram := vector[0].H
+		expectedHistogram := &histogram.FloatHistogram{
+			CounterResetHint: histogram.GaugeType,
+			Schema:           1,
+			ZeroThreshold:    0.001,
+			ZeroCount:        1. / 15.,
+			Count:            9. / 15.,
+			Sum:              1.2266666666666663,
+			PositiveSpans:    []histogram.Span{{Offset: 0, Length: 2}, {Offset: 1, Length: 2}},
+			PositiveBuckets:  []float64{1. / 15., 1. / 15., 1. / 15., 1. / 15.},
+			NegativeSpans:    []histogram.Span{{Offset: 0, Length: 2}, {Offset: 1, Length: 2}},
+			NegativeBuckets:  []float64{1. / 15., 1. / 15., 1. / 15., 1. / 15.},
+		}
+		require.Equal(t, expectedHistogram, actualHistogram)
+	})
+
+	t.Run("range_query", func(t *testing.T) {
+		step := 30 * time.Second
+		start := timestamp.Time(int64(5 * time.Minute / time.Millisecond))
+		end := start.Add(step)
+		qry, err := engine.NewRangeQuery(context.Background(), storage, nil, queryString, start, end, step)
+		require.NoError(t, err)
+		res := qry.Exec(context.Background())
+		require.NoError(t, res.Err)
+		matrix, err := res.Matrix()
+		require.NoError(t, err)
+		require.Len(t, matrix, 1)
+		require.Len(t, matrix[0].Histograms, 2)
+		actualHistograms := matrix[0].Histograms
+		expectedHistograms := []HPoint{{
+			T: 300000,
+			H: &histogram.FloatHistogram{
+				CounterResetHint: histogram.GaugeType,
+				Schema:           1,
+				ZeroThreshold:    0.001,
+				ZeroCount:        1. / 15.,
+				Count:            9. / 15.,
+				Sum:              1.2266666666666663,
+				PositiveSpans:    []histogram.Span{{Offset: 0, Length: 2}, {Offset: 1, Length: 2}},
+				PositiveBuckets:  []float64{1. / 15., 1. / 15., 1. / 15., 1. / 15.},
+				NegativeSpans:    []histogram.Span{{Offset: 0, Length: 2}, {Offset: 1, Length: 2}},
+				NegativeBuckets:  []float64{1. / 15., 1. / 15., 1. / 15., 1. / 15.},
+			},
+		}, {
+			T: 330000,
+			H: &histogram.FloatHistogram{
+				CounterResetHint: histogram.GaugeType,
+				Schema:           1,
+				ZeroThreshold:    0.001,
+				ZeroCount:        1. / 15.,
+				Count:            9. / 15.,
+				Sum:              1.2266666666666663,
+				PositiveSpans:    []histogram.Span{{Offset: 0, Length: 2}, {Offset: 1, Length: 2}},
+				PositiveBuckets:  []float64{1. / 15., 1. / 15., 1. / 15., 1. / 15.},
+				NegativeSpans:    []histogram.Span{{Offset: 0, Length: 2}, {Offset: 1, Length: 2}},
+				NegativeBuckets:  []float64{1. / 15., 1. / 15., 1. / 15., 1. / 15.},
+			},
+		}}
+		require.Equal(t, expectedHistograms, actualHistograms)
+	})
 }
 
 func TestNativeFloatHistogramRate(t *testing.T) {
@@ -4267,6 +4315,8 @@ func TestNativeHistogram_Sum_Count_Add_AvgOperator(t *testing.T) {
 
 				ts := idx0 * int64(10*time.Minute/time.Millisecond)
 				app := storage.Appender(context.Background())
+				_, err := app.Append(0, labels.FromStrings("__name__", "float_series", "idx", "0"), ts, 42)
+				require.NoError(t, err)
 				for idx1, h := range c.histograms {
 					lbls := labels.FromStrings("__name__", seriesName, "idx", fmt.Sprintf("%d", idx1))
 					// Since we mutate h later, we need to create a copy here.
@@ -4296,16 +4346,30 @@ func TestNativeHistogram_Sum_Count_Add_AvgOperator(t *testing.T) {
 
 					res := qry.Exec(context.Background())
 					require.NoError(t, res.Err)
+					require.Empty(t, res.Warnings)
 
 					vector, err := res.Vector()
 					require.NoError(t, err)
 
-					require.Equal(t, exp, vector)
+					testutil.RequireEqual(t, exp, vector)
+				}
+				queryAndCheckAnnotations := func(queryString string, ts int64, expWarnings annotations.Annotations) {
+					qry, err := engine.NewInstantQuery(context.Background(), storage, nil, queryString, timestamp.Time(ts))
+					require.NoError(t, err)
+
+					res := qry.Exec(context.Background())
+					require.NoError(t, res.Err)
+					require.Equal(t, expWarnings, res.Warnings)
 				}
 
 				// sum().
 				queryString := fmt.Sprintf("sum(%s)", seriesName)
 				queryAndCheck(queryString, ts, []Sample{{T: ts, H: &c.expected, Metric: labels.EmptyLabels()}})
+
+				queryString = `sum({idx="0"})`
+				var annos annotations.Annotations
+				annos.Add(annotations.NewMixedFloatsHistogramsAggWarning(posrange.PositionRange{Start: 4, End: 13}))
+				queryAndCheckAnnotations(queryString, ts, annos)
 
 				// + operator.
 				queryString = fmt.Sprintf(`%s{idx="0"}`, seriesName)
@@ -4558,7 +4622,7 @@ func TestNativeHistogram_SubOperator(t *testing.T) {
 						}
 					}
 
-					require.Equal(t, exp, vector)
+					testutil.RequireEqual(t, exp, vector)
 				}
 
 				// - operator.
@@ -4706,7 +4770,7 @@ func TestNativeHistogram_MulDivOperator(t *testing.T) {
 					vector, err := res.Vector()
 					require.NoError(t, err)
 
-					require.Equal(t, exp, vector)
+					testutil.RequireEqual(t, exp, vector)
 				}
 
 				// histogram * scalar.

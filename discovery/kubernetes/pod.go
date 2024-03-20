@@ -33,7 +33,10 @@ import (
 	"github.com/prometheus/prometheus/discovery/targetgroup"
 )
 
-const nodeIndex = "node"
+const (
+	nodeIndex = "node"
+	podIndex  = "pod"
+)
 
 // Pod discovers new pod targets.
 type Pod struct {
@@ -164,6 +167,12 @@ func (p *Pod) process(ctx context.Context, ch chan<- []*targetgroup.Group) bool 
 		level.Error(p.logger).Log("msg", "converting to Pod object failed", "err", err)
 		return true
 	}
+
+	if pod.Status.Phase != apiv1.PodRunning && pod.Status.Phase != apiv1.PodPending {
+		// ignore pods that are not running and are not pending
+		return true
+	}
+
 	send(ctx, ch, p.buildPod(pod))
 	return true
 }
@@ -326,7 +335,7 @@ func podSource(pod *apiv1.Pod) string {
 }
 
 func podSourceFromNamespaceAndName(namespace, name string) string {
-	return "pod/" + namespace + "/" + name
+	return "pod/" + namespacedName(namespace, name)
 }
 
 func podReady(pod *apiv1.Pod) model.LabelValue {

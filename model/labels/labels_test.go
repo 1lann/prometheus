@@ -114,7 +114,7 @@ func TestLabels_MatchLabels(t *testing.T) {
 
 	for i, test := range tests {
 		got := labels.MatchLabels(test.on, test.providedNames...)
-		require.Equal(t, test.expected, got, "unexpected labelset for test case %d", i)
+		require.True(t, Equal(test.expected, got), "unexpected labelset for test case %d", i)
 	}
 }
 
@@ -207,7 +207,7 @@ func TestLabels_WithoutEmpty(t *testing.T) {
 		},
 	} {
 		t.Run("", func(t *testing.T) {
-			require.Equal(t, test.expected, test.input.WithoutEmpty())
+			require.True(t, Equal(test.expected, test.input.WithoutEmpty()))
 		})
 	}
 }
@@ -447,6 +447,12 @@ func TestLabels_Get(t *testing.T) {
 	require.Equal(t, "222", FromStrings("aaaa", "111", "bbb", "222").Get("bbb"))
 }
 
+func TestLabels_DropMetricName(t *testing.T) {
+	require.True(t, Equal(FromStrings("aaa", "111", "bbb", "222"), FromStrings("aaa", "111", "bbb", "222").DropMetricName()))
+	require.True(t, Equal(FromStrings("aaa", "111"), FromStrings(MetricName, "myname", "aaa", "111").DropMetricName()))
+	require.True(t, Equal(FromStrings("__aaa__", "111", "bbb", "222"), FromStrings("__aaa__", "111", MetricName, "myname", "bbb", "222").DropMetricName()))
+}
+
 // BenchmarkLabels_Get was written to check whether a binary search can improve the performance vs the linear search implementation
 // The results have shown that binary search would only be better when searching last labels in scenarios with more than 10 labels.
 // In the following list, `old` is the linear search while `new` is the binary search implementation (without calling sort.Search, which performs even worse here)
@@ -563,6 +569,7 @@ func TestLabels_BytesWithoutLabels(t *testing.T) {
 }
 
 func TestBuilder(t *testing.T) {
+	reuseBuilder := NewBuilderWithSymbolTable(NewSymbolTable())
 	for i, tcase := range []struct {
 		base Labels
 		del  []string
@@ -573,6 +580,11 @@ func TestBuilder(t *testing.T) {
 		{
 			base: FromStrings("aaa", "111"),
 			want: FromStrings("aaa", "111"),
+		},
+		{
+			base: EmptyLabels(),
+			set:  []Label{{"aaa", "444"}, {"bbb", "555"}, {"ccc", "666"}},
+			want: FromStrings("aaa", "444", "bbb", "555", "ccc", "666"),
 		},
 		{
 			base: FromStrings("aaa", "111", "bbb", "222", "ccc", "333"),
@@ -632,8 +644,7 @@ func TestBuilder(t *testing.T) {
 			want: FromStrings("aaa", "111", "ddd", "444"),
 		},
 	} {
-		t.Run(fmt.Sprint(i), func(t *testing.T) {
-			b := NewBuilder(tcase.base)
+		test := func(t *testing.T, b *Builder) {
 			for _, lbl := range tcase.set {
 				b.Set(lbl.Name, lbl.Value)
 			}
@@ -641,7 +652,7 @@ func TestBuilder(t *testing.T) {
 				b.Keep(tcase.keep...)
 			}
 			b.Del(tcase.del...)
-			require.Equal(t, tcase.want, b.Labels())
+			require.True(t, Equal(tcase.want, b.Labels()))
 
 			// Check what happens when we call Range and mutate the builder.
 			b.Range(func(l Label) {
@@ -650,6 +661,18 @@ func TestBuilder(t *testing.T) {
 				}
 			})
 			require.Equal(t, tcase.want.BytesWithoutLabels(nil, "aaa", "bbb"), b.Labels().Bytes(nil))
+		}
+		t.Run(fmt.Sprintf("NewBuilder %d", i), func(t *testing.T) {
+			test(t, NewBuilder(tcase.base))
+		})
+		t.Run(fmt.Sprintf("NewSymbolTable %d", i), func(t *testing.T) {
+			b := NewBuilderWithSymbolTable(NewSymbolTable())
+			b.Reset(tcase.base)
+			test(t, b)
+		})
+		t.Run(fmt.Sprintf("reuseBuilder %d", i), func(t *testing.T) {
+			reuseBuilder.Reset(tcase.base)
+			test(t, reuseBuilder)
 		})
 	}
 	t.Run("set_after_del", func(t *testing.T) {
@@ -688,21 +711,22 @@ func TestScratchBuilder(t *testing.T) {
 		},
 	} {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
-			b := ScratchBuilder{}
+			b := NewScratchBuilder(len(tcase.add))
 			for _, lbl := range tcase.add {
 				b.Add(lbl.Name, lbl.Value)
 			}
 			b.Sort()
-			require.Equal(t, tcase.want, b.Labels())
+			require.True(t, Equal(tcase.want, b.Labels()))
 			b.Assign(tcase.want)
-			require.Equal(t, tcase.want, b.Labels())
+			require.True(t, Equal(tcase.want, b.Labels()))
 		})
 	}
 }
 
 func TestLabels_Hash(t *testing.T) {
 	lbls := FromStrings("foo", "bar", "baz", "qux")
-	require.Equal(t, lbls.Hash(), lbls.Hash())
+	hash1, hash2 := lbls.Hash(), lbls.Hash()
+	require.Equal(t, hash1, hash2)
 	require.NotEqual(t, lbls.Hash(), FromStrings("foo", "bar").Hash(), "different labels match.")
 }
 
