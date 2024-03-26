@@ -47,12 +47,12 @@ func (e *TrieEntry) Add(components []string) {
 	entry.Add(components[1:])
 }
 
-func (e *TrieEntry) Query(components []string) bool {
+func (e *TrieEntry) Query(components [][]byte) bool {
 	if len(components) == 0 {
 		return e.Terminal
 	}
 
-	entry, found := e.Entries[components[0]]
+	entry, found := e.Entries[string(components[0])]
 	if !found {
 		return false
 	}
@@ -101,15 +101,15 @@ func hideUnusedMetrics(response []byte) []byte {
 
 			// write into buffer if it looks like # TYPE metric_name metadata
 			if bytes.Equal(lineParts[0], []byte("EOF")) || (len(lineParts) > 1 &&
-				usedMetricsTrie.Query(strings.Split(string(lineParts[1]), "_"))) {
+				usedMetricsTrie.Query(bytes.Split(lineParts[1], []byte("_")))) {
 				outputBuf.Write(line)
 				outputBuf.WriteByte('\n')
 				continue
 			}
 		}
 
-		metricComponent := string(bytes.SplitN(trimmedLine, []byte("{"), 2)[0])
-		if usedMetricsTrie.Query(strings.Split(metricComponent, "_")) {
+		metricComponent := bytes.SplitN(trimmedLine, []byte("{"), 2)[0]
+		if usedMetricsTrie.Query(bytes.Split(metricComponent, []byte("_"))) {
 			outputBuf.Write(line)
 			outputBuf.WriteByte('\n')
 			continue
