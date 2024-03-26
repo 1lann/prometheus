@@ -971,11 +971,23 @@ func (c *scrapeCache) addRef(met []byte, ref storage.SeriesRef, lset labels.Labe
 }
 
 func (c *scrapeCache) addDropped(met []byte) {
+	metric := bytes.SplitN(bytes.SplitN(met, []byte("{"), 2)[0], []byte("\xFF"), 2)[0]
+	// if we don't want to track this metric, skip storing its dropped state.
+	if !usedMetricsTrie.Query(bytes.Split(metric, []byte("_"))) {
+		return
+	}
+
 	iter := c.iter
 	c.droppedSeries[string(met)] = &iter
 }
 
 func (c *scrapeCache) getDropped(met []byte) bool {
+	metric := bytes.SplitN(bytes.SplitN(met, []byte("{"), 2)[0], []byte("\xFF"), 2)[0]
+	// if we don't want to track this metric, skip storing its dropped state.
+	if !usedMetricsTrie.Query(bytes.Split(metric, []byte("_"))) {
+		return true
+	}
+
 	iterp, ok := c.droppedSeries[string(met)]
 	if ok {
 		*iterp = c.iter
@@ -998,6 +1010,11 @@ func (c *scrapeCache) forEachStale(f func(labels.Labels) bool) {
 }
 
 func (c *scrapeCache) setType(metric []byte, t model.MetricType) {
+	// if we don't want to track this metric, skip storing its type.
+	if !usedMetricsTrie.Query(bytes.Split(metric, []byte("_"))) {
+		return
+	}
+
 	c.metaMtx.Lock()
 
 	e, ok := c.metadata[string(metric)]
@@ -1015,6 +1032,11 @@ func (c *scrapeCache) setType(metric []byte, t model.MetricType) {
 }
 
 func (c *scrapeCache) setHelp(metric, help []byte) {
+	// if we don't want to track this metric, skip storing its help.
+	if !usedMetricsTrie.Query(bytes.Split(metric, []byte("_"))) {
+		return
+	}
+
 	c.metaMtx.Lock()
 
 	e, ok := c.metadata[string(metric)]
@@ -1032,6 +1054,11 @@ func (c *scrapeCache) setHelp(metric, help []byte) {
 }
 
 func (c *scrapeCache) setUnit(metric, unit []byte) {
+	// if we don't want to track this metric, skip storing its unit.
+	if !usedMetricsTrie.Query(bytes.Split(metric, []byte("_"))) {
+		return
+	}
+
 	c.metaMtx.Lock()
 
 	e, ok := c.metadata[string(metric)]
@@ -1324,8 +1351,6 @@ func (sl *scrapeLoop) scrapeAndReport(last, appendTime time.Time, errc chan<- er
 			sl.lastScrapeSize = len(b)
 		}
 		bytesRead = len(b)
-
-		b = hideUnusedMetrics(b)
 	} else {
 		level.Debug(sl.l).Log("msg", "Scrape failed", "err", scrapeErr)
 		if errc != nil {
